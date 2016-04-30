@@ -11,7 +11,8 @@
             This namespace only need be used by those providing logging
             implementations to be consumed by the core api."}
      clojure.tools.logging.impl
-  (:refer-clojure :exclude [name]))
+  (:refer-clojure :exclude [name])
+  (:require taoensso.timbre))
 
 (defprotocol Logger
   "The protocol through which the core api will interact with an underlying logging
@@ -43,6 +44,74 @@
   (reify LoggerFactory
     (name [_] "disabled")
     (get-logger [_ _] disabled-logger)))
+
+#_(require 'taoensso.timbre)
+;; TODO offer an option to leave the config dynamically bound, or to (statically) close over the value?
+(defn timbre-factory
+  "Returns a Timbre-based implementation of the LoggerFactory protocol, or nil if
+  not available."
+  []
+  (try
+    (require 'taoensso.timbre)
+    ;; (eval `(do
+    ;;          (require 'taoensso.timbre)
+    ;;          (reify
+    ;;            LoggerFactory
+    ;;            (name [_#] "taoensso.timbre")
+    ;;            (get-logger [_# logger-ns#]
+    ;;              ;; TODO do I need to cache? Something like `(memoize (fn [logger-ns] (reify Logger …)))`?
+    ;;              (reify
+    ;;                Logger
+    ;;                (enabled? [_# level#]
+    ;;                  (taoensso.timbre/log? level# logger-ns#))
+    ;;                (write! [_# level# throwable# message#]
+    ;;                  (taoensso.timbre/log!
+    ;;                   level#
+    ;;                   :p  ; TODO definitely shouldn't be `:f` or `nil`? (Consult <https://github.com/ptaoussanis/timbre/blob/v4.3.1/src/taoensso/timbre.cljx#L489> and <https://github.com/ptaoussanis/timbre/blob/v4.3.1/src/taoensso/timbre.cljx#L385-L392>.)
+    ;;                   [message#]
+    ;;                   {
+    ;;                    ;; :config
+    ;;                    :?err throwable#
+    ;;                    :?ns-str (str logger-ns#)
+    ;;                    ;; :?file
+    ;;                    ;; :?line
+    ;;                    ;; :?base-data
+    ;;                    })))))))
+
+    ;; (eval `(reify
+    ;;          LoggerFactory
+    ;;          (name [_#] "taoensso.timbre")
+    ;;          (get-logger [_# logger-ns#]
+    ;;           ;; TODO do I need to cache? Something like `(memoize (fn [logger-ns] (reify Logger …)))`?
+    ;;            (reify
+    ;;              Logger
+    ;;              (enabled? [_# level#]
+    ;;                (taoensso.timbre/log? level# logger-ns#))
+    ;;              (write! [_# level# throwable# message#]
+    ;;                (taoensso.timbre/log!
+    ;;                 level#
+    ;;                 :p  ; TODO definitely shouldn't be `:f` or `nil`? (Consult <https://github.com/ptaoussanis/timbre/blob/v4.3.1/src/taoensso/timbre.cljx#L489> and <https://github.com/ptaoussanis/timbre/blob/v4.3.1/src/taoensso/timbre.cljx#L385-L392>.)
+    ;;                 [message#]
+    ;;                 {
+    ;;                  ;; :config
+    ;;                  :?err throwable#
+    ;;                  :?ns-str (str logger-ns#)
+    ;;                  ;; :?file
+    ;;                  ;; :?line
+    ;;                  ;; :?base-data
+    ;;                  }))))))
+    (reify LoggerFactory
+      (name [_] "taoensso.timbre")
+      (get-logger [_ logger-ns]
+        ;; TODO do I need to cache? Something like `(memoize (fn [logger-ns] (reify Logger  …)))`?
+        (reify Logger
+          (enabled? [_ level]
+            (taoensso.timbre/log? level (str logger-ns)))
+          (write! [_ level throwable message]
+            (taoensso.timbre/log! level :p [message] {:?err throwable, :?ns-str (str logger-ns)})))))
+
+    (catch Exception _ nil))
+  )
 
 (defn slf4j-factory
   "Returns a SLF4J-based implementation of the LoggerFactory protocol, or nil if
@@ -215,7 +284,8 @@
   "Returns the first non-nil value from slf4j-factory, cl-factory,
    log4j-factory, and jul-factory."
   []
-  (or (slf4j-factory)
+  (or (timbre-factory)
+      (slf4j-factory)
       (cl-factory)
       (log4j-factory)
       (jul-factory)
